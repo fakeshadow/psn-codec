@@ -1,0 +1,22 @@
+[package]
+name = "psn-codec-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+[package.metadata]
+cargo-fuzz = true
+[dependencies]
+libfuzzer-sys = "0.4"
+psn-codec = { path = "..", features = ["base64"] }
+[[bin]]
+name = "ticket"
+path = "fuzz_targets/ticket.rs"
+test = false
+doc = false
+bench = false
+[[bin]]
+name = "base64"
+path = "fuzz_targets/base64.rs"
+test = false
+doc = false
+bench = false

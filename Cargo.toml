@@ -1,0 +1,27 @@
+[package]
+name = "psn-codec"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+license = "MIT"
+description = "Bounded binary ticket decoding with explicit unverified claims"
+readme = "README.md"
+publish = false
+include = [
+    "Cargo.toml", "Cargo.lock", "README.md", "LICENSE", "NOTICE",
+    "src/**", "tests/**", "examples/**",
+]
+
+[features]
+default = ["std"]
+std = []
+base64 = ["dep:base64"]
+
+[dependencies]
+base64 = { version = "=0.22.1", optional = true, default-features = false, features = ["alloc"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[profile.release]
+overflow-checks = true

@@ -1,0 +1,31 @@
+{
+  "kind": "synthetic test fixtures",
+  "license": "MIT",
+  "authentication": "none",
+  "fixtures": [
+    {
+      "file": "psn20-synthetic.bin",
+      "bytes": 212,
+      "sha256": "ff87b856cd3401bd9148f349cd605c8c2e462b5ae34202c93a8771321669b6d3",
+      "version": "0x21000000"
+    },
+    {
+      "file": "psn21-synthetic.bin",
+      "bytes": 212,
+      "sha256": "e9bc450193ddea19bd0be7ed69f46c411a48757893069107be7cf4a01a93de8b",
+      "version": "0x21010000"
+    },
+    {
+      "file": "psn30-synthetic.bin",
+      "bytes": 220,
+      "sha256": "ee249a180fc54e6fdce7ec42ac99399565940633db2d5f446d0b9209f650cc48",
+      "version": "0x31000000"
+    },
+    {
+      "file": "rpcn21-unsigned.bin",
+      "bytes": 248,
+      "sha256": "dedba64c578c83d05a3cb0a9187172bcec71b6889209fed77c6f59182c7edeaa",
+      "version": "0x21010000"
+    }
+  ]
+}
