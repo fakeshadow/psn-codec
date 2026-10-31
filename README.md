@@ -34,8 +34,8 @@ Default `std` enables standard error traits. Disabling default features uses
 Rust 1.88 or newer is required. This crate forbids unsafe code.
 
 ```text
-cargo test --all-features --locked --offline
-cargo run --example admission --all-features --locked --offline
+cargo test --all-features --locked
+cargo run --example admission --all-features --locked
 ```
 
 MIT licensed. Optional dependency notices are in `NOTICE`.

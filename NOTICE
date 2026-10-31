@@ -1,3 +1,2 @@
-Optional dependency: base64 0.22.1 (MIT OR Apache-2.0).
-Its bundled source retains its original license notices. Preserve those notices
-when redistributing that source.
+Optional dependency: base64 (MIT OR Apache-2.0).
+Dependency sources and their license notices are distributed in their own packages.
