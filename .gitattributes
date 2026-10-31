@@ -1,0 +1,6 @@
+# Keep project text consistent across checkout platforms.
+* text=auto eol=lf
+
+# Vendored checksums and binary fixtures require byte-for-byte preservation.
+/vendor/** -text
+/tests/fixtures/*.bin -text

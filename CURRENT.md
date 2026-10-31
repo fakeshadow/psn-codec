@@ -9,3 +9,8 @@ Source/package audit completed; registry publication remains disabled.
 The 25-file package builds and passes extracted-source tests; Rustdoc warnings are denied.
 The legacy name helper is is_legacy_online_id.
 Fuzz targets are present but have not been run on this host.
+
+Checkout fix: .gitattributes preserves vendor/fixture bytes and uses LF for text.
+The reported vendor checksum failure was reproduced with core.autocrlf=true.
+Fresh checkout with the rules passes all 37 vendor checksums and 57 integration
+tests + 3 doctests using the same offline all-feature test command.

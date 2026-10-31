@@ -3,10 +3,11 @@ name = "psn-codec"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.88"
+repository = "https://github.com/fakeshadow/psn-codec"
+authors = ["fakeshadow <everestshadow@gmail.com>"]
 license = "MIT"
 description = "Bounded binary ticket decoding with explicit unverified claims"
 readme = "README.md"
-publish = false
 include = [
     "Cargo.toml", "Cargo.lock", "README.md", "LICENSE", "NOTICE",
     "src/**", "tests/**", "examples/**",
