@@ -783,55 +783,44 @@ impl<'a> TicketReport<'a> {
         Ok(self.footers[0].fields[0].data)
     }
 }
-/// Optional deterministic claims policy. Success does not verify a signature.
-#[derive(Clone, Copy)]
-pub struct ClaimsPolicy {
-    /// Exact padded wire service ID, as held by Claims::service_id.
-    pub expected_service_id: ServiceId,
-    pub now: UnixMillis,
-    pub clock_skew_ms: u64,
-    pub require_legacy_online_id: bool,
-}
+/// Validity-window defect from [`Claims::check_time`]. Metadata only, never timestamps or claims.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum PolicyError {
-    ServiceMismatch,
-    InvalidTimeRange,
+#[non_exhaustive]
+pub enum TimeError {
+    InvalidRange,
     NotYetValid,
     Expired,
-    InvalidOnlineId,
 }
-/// Pure policy check; no replay storage, clock access or issuer authentication.
-pub fn assess_claims(c: &Claims<'_>, policy: &ClaimsPolicy) -> Result<(), PolicyError> {
-    if c.service_id != policy.expected_service_id {
-        return Err(PolicyError::ServiceMismatch);
+impl fmt::Display for TimeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{self:?}")
     }
-    if c.expires.0 <= c.issued.0 {
-        return Err(PolicyError::InvalidTimeRange);
+}
+#[cfg(feature = "std")]
+impl std::error::Error for TimeError {}
+
+impl Claims<'_> {
+    /// Two's-complement signed 32-bit view of the raw wire `issuer_id`.
+    /// Useful for signed range checks without `u32` wraparound; never authenticates an issuer.
+    pub const fn issuer_id_i32(&self) -> i32 {
+        self.issuer_id as i32
     }
-    if c.issued.0.saturating_sub(policy.clock_skew_ms) > policy.now.0 {
-        return Err(PolicyError::NotYetValid);
+    /// Pure validity-window check with caller-supplied clock and skew tolerance.
+    /// Performs no clock access, replay check, or signature verification.
+    pub const fn check_time(&self, now: UnixMillis, clock_skew_ms: u64) -> Result<(), TimeError> {
+        if self.expires.0 <= self.issued.0 {
+            return Err(TimeError::InvalidRange);
+        }
+        if self.issued.0.saturating_sub(clock_skew_ms) > now.0 {
+            return Err(TimeError::NotYetValid);
+        }
+        if now.0 >= self.expires.0 && now.0 - self.expires.0 >= clock_skew_ms {
+            return Err(TimeError::Expired);
+        }
+        Ok(())
     }
-    if policy.now.0 >= c.expires.0 && policy.now.0 - c.expires.0 >= policy.clock_skew_ms {
-        return Err(PolicyError::Expired);
-    }
-    if policy.require_legacy_online_id
-        && !crate::identity::is_legacy_online_id(c.np_id.online_id().as_str())
-    {
-        return Err(PolicyError::InvalidOnlineId);
-    }
-    Ok(())
 }
 
-impl fmt::Debug for ClaimsPolicy {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ClaimsPolicy")
-            .field("service", &"[redacted]")
-            .field("now", &self.now)
-            .field("clock_skew_ms", &self.clock_skew_ms)
-            .field("require_legacy_online_id", &self.require_legacy_online_id)
-            .finish()
-    }
-}
 /// Inspection policy configured on Options; inspect is the only parser.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ParseMode {

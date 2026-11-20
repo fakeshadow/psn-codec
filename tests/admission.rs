@@ -2,9 +2,8 @@
 #[path = "../examples/support/admission.rs"]
 mod admission;
 use admission::{ALLOWED, Rejection, admit, prefixed, raw_or_prefixed};
-use psn_codec::ticket::{
-    ClaimsPolicy, Code, Options, PolicyError, Profile, UnixMillis, assess_claims, inspect,
-};
+use psn_codec::ServiceId;
+use psn_codec::ticket::{Code, Options, Profile, TimeError, UnixMillis, inspect};
 
 const RPCN: &[u8] = include_bytes!("fixtures/rpcn21-unsigned.bin");
 fn vectors() -> [&'static [u8]; 4] {
@@ -154,38 +153,27 @@ fn admission_enforces_service_safe_name_policy_without_logging_bad_claims() {
     assert!(!format!("{error:?}").contains("Never Log Me"));
 }
 #[test]
-fn semantic_policy_can_tighten_admission_without_another_parse() {
+fn caller_admission_checks_compose_without_another_parse() {
     let report = admit(RPCN, &ALLOWED).unwrap();
     let claims = report.claims().unwrap();
-    let mut expected = [0u8; 24];
-    expected[..12].copy_from_slice(b"TEST-SERVICE");
-    let policy = ClaimsPolicy {
-        expected_service_id: expected.into(),
-        now: UnixMillis(1500),
-        clock_skew_ms: 0,
-        require_legacy_online_id: true,
-    };
-    assert_eq!(assess_claims(&claims, &policy), Ok(()));
-    assert_eq!(
-        assess_claims(
-            &claims,
-            &ClaimsPolicy {
-                now: UnixMillis(2000),
-                ..policy
-            }
-        ),
-        Err(PolicyError::Expired)
+    let allowed_services = [
+        ServiceId::from_str_nul_padded("UP1004-BLUS30442_00").unwrap(),
+        ServiceId::from_str_nul_padded("TEST-SERVICE").unwrap(),
+    ];
+    assert!(allowed_services.contains(&claims.service_id));
+    assert!(
+        ["BLUS30442", "SERVICE"]
+            .iter()
+            .any(|pattern| claims.service_id.contains(pattern))
     );
+    assert!(!claims.account_id.is_zero());
+    assert!(claims.issuer_id_i32() >= 0);
+    assert_eq!(claims.check_time(UnixMillis(1500), 0), Ok(()));
     assert_eq!(
-        assess_claims(
-            &claims,
-            &ClaimsPolicy {
-                expected_service_id: [0; 24].into(),
-                ..policy
-            }
-        ),
-        Err(PolicyError::ServiceMismatch)
+        claims.check_time(UnixMillis(2000), 0),
+        Err(TimeError::Expired)
     );
+    assert_ne!(claims.service_id, ServiceId::from([0; 24]));
 }
 #[cfg(feature = "base64")]
 #[test]

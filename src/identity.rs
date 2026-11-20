@@ -5,6 +5,7 @@
 //! ```
 //! use psn_codec::{AccountId, OnlineId, SceNpId, ServiceId};
 //! let account = AccountId::from(42);
+//! assert!(!account.is_zero());
 //! let name_only = SceNpId::from(OnlineId::try_from("Player_1")?);
 //! assert_eq!(name_only.online_id().as_str(), "Player_1");
 //! assert!(name_only.platform_bytes().is_none());
@@ -16,6 +17,9 @@
 //! let service = ServiceId::from([0u8; 24]);
 //! assert_eq!(service.as_bytes().len(), 24);
 //! assert_eq!(ServiceId::try_from(&[0u8; 24][..])?, service);
+//! let title = ServiceId::from_str_nul_padded("UP1004-BLUS30442_00")?;
+//! assert_eq!(title.as_str()?, "UP1004-BLUS30442_00");
+//! assert!(title.contains("BLUS30442"));
 //! let independent_name: OnlineId = *platform.online_id();
 //! assert_eq!(independent_name.as_str(), "Player_1");
 //! assert_eq!(u64::from(account), 42);
@@ -28,6 +32,12 @@ use core::{fmt, str};
 /// Extract with `u64::from(account)`; this is independent of [`SceNpId`].
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct AccountId(u64);
+impl AccountId {
+    /// Whether the raw numeric account claim is zero.
+    pub const fn is_zero(self) -> bool {
+        self.0 == 0
+    }
+}
 impl From<u64> for AccountId {
     fn from(value: u64) -> Self {
         Self(value)
@@ -46,9 +56,11 @@ impl fmt::Debug for AccountId {
 
 /// Validation metadata only, never raw identity contents.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum IdentityError {
     InvalidWidth { expected: usize, actual: usize },
     OnlineIdTooLong { actual: usize },
+    ServiceIdTooLong { actual: usize },
     MissingTerminator,
     InvalidUtf8,
     InvalidPadding,
@@ -106,9 +118,10 @@ impl fmt::Debug for OnlineId {
 
 /// Owned exact 24-byte service field. Acquire from
 /// [`Claims::service_id`](crate::ticket::Claims::service_id),
-/// `ServiceId::from(array)` or `ServiceId::try_from(slice)`. The latter requires
-/// exactly 24 bytes. No padding/normalization is invented.
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+/// `ServiceId::from(array)`, `ServiceId::try_from(slice)` (exact 24 bytes,
+/// without invented padding), or [`ServiceId::from_str_nul_padded`] (explicit
+/// NUL padding for UTF-8 strings up to 24 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ServiceId([u8; 24]);
 impl From<[u8; 24]> for ServiceId {
     fn from(value: [u8; 24]) -> Self {
@@ -126,6 +139,25 @@ impl TryFrom<&[u8]> for ServiceId {
     }
 }
 impl ServiceId {
+    /// Construct a 24-byte NUL-padded service ID from valid UTF-8 (`<= 24` bytes,
+    /// no interior NUL). Exact 24-byte raw inputs should use `From<[u8; 24]>` or
+    /// `TryFrom<&[u8]>`.
+    pub const fn from_str_nul_padded(value: &str) -> Result<Self, IdentityError> {
+        let src = value.as_bytes();
+        if src.len() > 24 {
+            return Err(IdentityError::ServiceIdTooLong { actual: src.len() });
+        }
+        let mut bytes = [0u8; 24];
+        let mut i = 0;
+        while i < src.len() {
+            if src[i] == 0 {
+                return Err(IdentityError::InvalidPadding);
+            }
+            bytes[i] = src[i];
+            i += 1;
+        }
+        Ok(Self(bytes))
+    }
     /// Exact bytes including padding, borrowed immutably from this value.
     pub fn as_bytes(&self) -> &[u8; 24] {
         &self.0
@@ -137,6 +169,18 @@ impl ServiceId {
             return Err(IdentityError::InvalidPadding);
         }
         str::from_utf8(&self.0[..end]).map_err(|_| IdentityError::InvalidUtf8)
+    }
+    /// Partial substring check against canonical NUL-padded UTF-8 text.
+    /// Empty patterns, invalid UTF-8, and non-NUL trailing padding return `false`.
+    /// Prefer exact `ServiceId` comparison when full service IDs are known.
+    pub fn contains(&self, pattern: &str) -> bool {
+        if pattern.is_empty() {
+            return false;
+        }
+        match self.as_str() {
+            Ok(text) => text.contains(pattern),
+            Err(_) => false,
+        }
     }
 }
 impl fmt::Debug for ServiceId {

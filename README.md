@@ -24,8 +24,10 @@ through `claims.np_id.online_id()`. Original 36-byte identity records can be
 acquired with `SceNpId::try_from(slice)`; ticket-derived identities do not invent
 those bytes. Constructors and conversions are documented in Rustdoc.
 
-`ClaimsPolicy` checks exact service bytes, time and optional legacy name rules
-with caller-supplied context. It supplies no signature or replay guarantee.
+Admission policy stays with the caller using composable helpers on unverified
+claims: `AccountId::is_zero`, `ServiceId::from_str_nul_padded`,
+`ServiceId::contains`, `Claims::issuer_id_i32`, `Claims::check_time`, and
+`is_legacy_online_id`. None of these supplies a signature or replay guarantee.
 Raw ticket data and signing spans remain available through explicit accessors.
 
 Default limits are 64 KiB input, 256 fields and 32 retained diagnostics.

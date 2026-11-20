@@ -99,6 +99,7 @@ fn service_ids_preserve_binary_values_and_validate_text_only_on_request() {
     let id = ServiceId::from(raw);
     assert_eq!(id.as_bytes(), &raw);
     assert_eq!(id.as_str(), Err(IdentityError::InvalidUtf8));
+    assert!(!id.contains("A"));
     let mut raw = [0; 24];
     raw[0] = b'A';
     raw[23] = b'B';
@@ -106,6 +107,98 @@ fn service_ids_preserve_binary_values_and_validate_text_only_on_request() {
         ServiceId::from(raw).as_str(),
         Err(IdentityError::InvalidPadding)
     );
+    assert!(!ServiceId::from(raw).contains("A"));
+}
+#[test]
+fn account_id_zero_check_is_const_and_explicit() {
+    const fn check_zero(id: AccountId) -> bool {
+        id.is_zero()
+    }
+    assert!(check_zero(AccountId::from(0)));
+    assert!(!check_zero(AccountId::from(1)));
+    assert!(!AccountId::from(u64::MAX).is_zero());
+}
+#[test]
+fn service_id_nul_padded_construction_ordering_and_partial_matching() {
+    const US: ServiceId = match ServiceId::from_str_nul_padded("UP1004-BLUS30442_00") {
+        Ok(id) => id,
+        Err(_) => panic!("valid service id"),
+    };
+    const EU: ServiceId = match ServiceId::from_str_nul_padded("EP1004-BLES00652_00") {
+        Ok(id) => id,
+        Err(_) => panic!("valid service id"),
+    };
+    const JP: ServiceId = match ServiceId::from_str_nul_padded("JP0604-BLJS10046_00") {
+        Ok(id) => id,
+        Err(_) => panic!("valid service id"),
+    };
+
+    assert_eq!(US.as_str(), Ok("UP1004-BLUS30442_00"));
+    assert_eq!(&US.as_bytes()[..19], b"UP1004-BLUS30442_00");
+    assert_eq!(&US.as_bytes()[19..], &[0; 5]);
+
+    // Empty and full-width 24-byte values round-trip cleanly.
+    let empty = ServiceId::from_str_nul_padded("").unwrap();
+    assert_eq!(empty.as_bytes(), &[0; 24]);
+    assert_eq!(empty.as_str(), Ok(""));
+    assert!(!empty.contains(""));
+
+    let full = ServiceId::from_str_nul_padded("UP0001-BLUS30001_00-0000").unwrap();
+    assert_eq!(full.as_str(), Ok("UP0001-BLUS30001_00-0000"));
+    assert!(full.contains("BLUS30001"));
+    assert!(full.contains("0000"));
+
+    // Multi-byte UTF-8 within 24 bytes is preserved.
+    let utf8 = ServiceId::from_str_nul_padded("ÜP-123").unwrap();
+    assert_eq!(utf8.as_str(), Ok("ÜP-123"));
+    assert!(utf8.contains("ÜP"));
+
+    // Reject >24 UTF-8 bytes and interior NULs without exposing input text.
+    let too_long = "1234567890123456789012345";
+    let err = ServiceId::from_str_nul_padded(too_long).unwrap_err();
+    assert_eq!(err, IdentityError::ServiceIdTooLong { actual: 25 });
+    assert!(!err.to_string().contains(too_long));
+    assert_eq!(
+        ServiceId::from_str_nul_padded("ééééééééééééé").unwrap_err(),
+        IdentityError::ServiceIdTooLong { actual: 26 }
+    );
+    assert_eq!(
+        ServiceId::from_str_nul_padded("A\0B").unwrap_err(),
+        IdentityError::InvalidPadding
+    );
+    assert_eq!(
+        ServiceId::from_str_nul_padded("\0").unwrap_err(),
+        IdentityError::InvalidPadding
+    );
+
+    // Partial substring matching is case-sensitive, fail-closed on empty/NUL patterns,
+    // and composes cleanly with standard iterators.
+    assert!(US.contains("BLUS30442"));
+    assert!(US.contains("UP1004-BLUS30442_00"));
+    assert!(!US.contains("blus30442"));
+    assert!(!US.contains(""));
+    assert!(!US.contains("BLUS30442\0"));
+    assert!(
+        ["NPUB30857", "BLUS30442"]
+            .iter()
+            .any(|pattern| US.contains(pattern))
+    );
+    assert!(
+        !["NPUB30857", "BLES00652"]
+            .iter()
+            .any(|pattern| US.contains(pattern))
+    );
+
+    // Non-NUL trailing padding causes contains() to fail closed even if the prefix matches.
+    let mut bad_padding = *US.as_bytes();
+    bad_padding[23] = b'X';
+    assert!(!ServiceId::from(bad_padding).contains("BLUS30442"));
+
+    // Ordering supports BTreeSet and exact multi-region lookups.
+    let allowed = std::collections::BTreeSet::from([US, EU, JP]);
+    assert!(allowed.contains(&EU));
+    assert!(!allowed.contains(&full));
+    assert!(EU < JP && JP < US);
 }
 #[test]
 fn identity_debug_formatting_is_redacted() {

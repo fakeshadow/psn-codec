@@ -203,33 +203,77 @@ fn debug_and_errors_do_not_expose_claims() {
     }
 }
 #[test]
-fn injected_time_service_and_name_policy() {
+fn composable_time_service_issuer_account_and_name_checks() {
     let t = inspect(VECTOR, &options()).unwrap();
     let c = t.claims().unwrap();
-    let mut p = ClaimsPolicy {
-        expected_service_id: c.service_id,
-        now: UnixMillis(1000),
-        clock_skew_ms: 0,
-        require_legacy_online_id: true,
-    };
-    assert_eq!(assess_claims(&t.claims().unwrap(), &p), Ok(()));
-    p.now = UnixMillis(999);
+    let expected = psn_codec::ServiceId::from_str_nul_padded("TEST-SERVICE").unwrap();
+    assert_eq!(c.service_id, expected);
+    assert!(c.service_id.contains("TEST"));
+    assert!(!c.service_id.contains(""));
+    assert!(!c.account_id.is_zero());
+    assert_eq!(c.issuer_id_i32(), 256);
+
+    assert_eq!(c.check_time(UnixMillis(1000), 0), Ok(()));
     assert_eq!(
-        assess_claims(&t.claims().unwrap(), &p),
-        Err(PolicyError::NotYetValid)
+        c.check_time(UnixMillis(999), 0),
+        Err(TimeError::NotYetValid)
     );
-    p.now = UnixMillis(2000);
+    assert_eq!(c.check_time(UnixMillis(2000), 0), Err(TimeError::Expired));
+    assert_eq!(c.check_time(UnixMillis(2000), 1), Ok(()));
+    assert_eq!(c.check_time(UnixMillis(2001), 1), Err(TimeError::Expired));
+    assert_eq!(c.check_time(UnixMillis(999), 1), Ok(()));
     assert_eq!(
-        assess_claims(&t.claims().unwrap(), &p),
-        Err(PolicyError::Expired)
+        c.check_time(UnixMillis(998), 1),
+        Err(TimeError::NotYetValid)
     );
-    p.clock_skew_ms = 1;
-    assert_eq!(assess_claims(&t.claims().unwrap(), &p), Ok(()));
-    p.expected_service_id = psn_codec::ServiceId::from([0; 24]);
+    assert_eq!(TimeError::Expired.to_string(), "Expired");
+    #[cfg(feature = "std")]
+    {
+        let err: &dyn std::error::Error = &TimeError::NotYetValid;
+        assert_eq!(err.to_string(), "NotYetValid");
+    }
+
+    // Zero or reversed validity windows are rejected.
+    let mut bad_window = VECTOR.to_vec();
+    let expires_span = field_span(3);
+    bad_window[expires_span.start() + 4..expires_span.end()]
+        .copy_from_slice(&1000u64.to_be_bytes());
+    let equal_claims = inspect(&bad_window, &options()).unwrap().claims().unwrap();
     assert_eq!(
-        assess_claims(&t.claims().unwrap(), &p),
-        Err(PolicyError::ServiceMismatch)
+        equal_claims.check_time(UnixMillis(1000), 500),
+        Err(TimeError::InvalidRange)
     );
+    bad_window[expires_span.start() + 4..expires_span.end()].copy_from_slice(&999u64.to_be_bytes());
+    let reversed_claims = inspect(&bad_window, &options()).unwrap().claims().unwrap();
+    assert_eq!(
+        reversed_claims.check_time(UnixMillis(999), 500),
+        Err(TimeError::InvalidRange)
+    );
+
+    // High-bit issuer_id values map to negative i32 rather than large positive values.
+    let issuer_span = field_span(1);
+    for (raw_u32, expected_i32) in [(0x8000_0000u32, i32::MIN), (0xFFFF_FFFFu32, -1)] {
+        let mut v = VECTOR.to_vec();
+        v[issuer_span.start() + 4..issuer_span.end()].copy_from_slice(&raw_u32.to_be_bytes());
+        let claims = inspect(&v, &options()).unwrap().claims().unwrap();
+        assert_eq!(claims.issuer_id, raw_u32);
+        assert_eq!(claims.issuer_id_i32(), expected_i32);
+        assert!(claims.issuer_id_i32() < 0);
+    }
+
+    // Zero account_id is detectable through AccountId::is_zero.
+    let account_span = field_span(4);
+    let mut zero_account = VECTOR.to_vec();
+    zero_account[account_span.start() + 4..account_span.end()].fill(0);
+    assert!(
+        inspect(&zero_account, &options())
+            .unwrap()
+            .claims()
+            .unwrap()
+            .account_id
+            .is_zero()
+    );
+
     assert!(psn_codec::identity::is_legacy_online_id("1ab"));
     assert!(!psn_codec::identity::is_legacy_online_id("ab/evil"));
 }
@@ -286,26 +330,18 @@ fn scalar_width_defects_with_consistent_container_sizes() {
     }
 }
 #[test]
-fn policy_extreme_timestamps_do_not_overflow() {
+fn check_time_extreme_timestamps_do_not_overflow() {
     let mut v = VECTOR.to_vec();
     let span = field_span(3);
     v[span.start() + 4..span.end()].copy_from_slice(&u64::MAX.to_be_bytes());
     let t = inspect(&v, &options()).unwrap();
-    let p = ClaimsPolicy {
-        expected_service_id: t.claims().unwrap().service_id,
-        now: UnixMillis(u64::MAX),
-        clock_skew_ms: 1,
-        require_legacy_online_id: false,
-    };
-    assert_eq!(assess_claims(&t.claims().unwrap(), &p), Ok(()));
-    let p = ClaimsPolicy {
-        clock_skew_ms: 0,
-        ..p
-    };
+    let claims = t.claims().unwrap();
+    assert_eq!(claims.check_time(UnixMillis(u64::MAX), 1), Ok(()));
     assert_eq!(
-        assess_claims(&t.claims().unwrap(), &p),
-        Err(PolicyError::Expired)
+        claims.check_time(UnixMillis(u64::MAX), 0),
+        Err(TimeError::Expired)
     );
+    assert_eq!(claims.check_time(UnixMillis(0), u64::MAX), Ok(()));
 }
 #[test]
 fn each_single_byte_value_preserves_invariants() {
@@ -365,11 +401,10 @@ fn claims_are_borrowed_from_one_inspection_and_outlive_report_metadata() {
     };
     assert_eq!(claims.np_id.online_id().as_str(), "Test_Player");
     assert_eq!(claims.serial.as_ptr(), VECTOR[16..].as_ptr());
-    let policy = ClaimsPolicy {
-        expected_service_id: claims.service_id,
-        now: UnixMillis(1500),
-        clock_skew_ms: 0,
-        require_legacy_online_id: true,
-    };
-    assert_eq!(assess_claims(&claims, &policy), Ok(()));
+    assert_eq!(
+        claims.service_id,
+        psn_codec::ServiceId::from_str_nul_padded("TEST-SERVICE").unwrap()
+    );
+    assert!(claims.service_id.contains("SERVICE"));
+    assert_eq!(claims.check_time(UnixMillis(1500), 0), Ok(()));
 }
